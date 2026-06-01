@@ -11,3 +11,5 @@ requests
 openpyxl
 logzero
 scikit-learn
+websocket-client
+websockets

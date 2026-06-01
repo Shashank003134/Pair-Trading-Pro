@@ -10,3 +10,4 @@ scipy
 requests
 openpyxl
 logzero
+scikit-learn

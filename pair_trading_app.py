@@ -87,15 +87,18 @@ def load_instruments():
 
 instruments = load_instruments()
 
+@st.cache_resource(ttl=3600)
 def connect_angel():
     try:
+        import time
+        time.sleep(1)
         totp = pyotp.TOTP(TOTP_KEY).now()
         obj = SmartConnect(api_key=API_KEY)
         data = obj.generateSession(CLIENT_ID, PASSWORD, totp)
         if data['status']:
             return obj
     except Exception as e:
-        st.error(f'Angel One connection failed: {e}')
+        st.warning(f'Angel One connection failed: {e}')
     return None
 
 angel_obj = connect_angel()
@@ -106,6 +109,8 @@ def get_token(symbol):
 
 def get_live_price(symbol):
     try:
+        import time
+        time.sleep(0.3)
         if angel_obj:
             token = get_token(symbol)
             if token:

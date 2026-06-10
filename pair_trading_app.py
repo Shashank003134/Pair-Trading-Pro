@@ -14,10 +14,54 @@ st.markdown('<h1 style="text-align:center; color:#1f77b4;">AlphaPairs</h1>', uns
 st.markdown('<h4 style="text-align:center; color:#444444;"><i>Find the Divergence. Capture the Convergence.</i></h4>', unsafe_allow_html=True)
 st.markdown('<h5 style="text-align:center; color:gray;">Statistical Pair Trading — OLS | ADF | ECM | Cointegration | Live Angel One Data</h5>', unsafe_allow_html=True)
 st.markdown('<h5 style="text-align:center; color:gray;">Powered by OLS Regression | ADF Test | ECM | Live Angel One Data</h5>', unsafe_allow_html=True)
-st.divider()
+# Guide Modal
+if 'show_guide' not in st.session_state:
+    st.session_state.show_guide = True
+
+col_guide = st.columns([8, 1])
+with col_guide[1]:
+    if st.button('📖 Guide'):
+        st.session_state.show_guide = True
+        st.rerun()
+
+@st.dialog('Welcome to AlphaPairs 📈', width='large')
+def show_guide_modal():
+    st.markdown('<p style="font-size:16px;">A <b>Quantitative Pair Trading Platform</b> analysing <b>204 NSE F&O stocks</b> with live Angel One signals.</p>', unsafe_allow_html=True)
+    st.divider()
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.markdown('**📊 Live Signals**')
+        st.markdown('Active BUY/SELL signals with sector filters and live prices.')
+    with c2:
+        st.markdown('**🔍 Pair Analysis**')
+        st.markdown('Charts, Z-Score history, trade levels and risk calculator.')
+    with c3:
+        st.markdown('**📋 All Pairs**')
+        st.markdown('222 validated pairs that passed 6 statistical tests.')
+    st.divider()
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown('**🚦 Signals**')
+        st.success('BUY — Z-Score < -2')
+        st.error('SELL — Z-Score > 2')
+        st.warning('CAUTION — Z-Score > 3')
+        st.info('NO TRADE — Z-Score between ±2')
+    with c2:
+        st.markdown('**📌 How to Trade**')
+        st.markdown('1. Open **Live Signals** tab\n2. Check **Same Sector** filter\n3. Analyse pair in **Pair Analysis**\n4. Enter at Z-Score **±2**\n5. Exit at Z-Score **0**\n6. Stop Loss at Z-Score **±3**')
+    st.divider()
+    st.markdown('**🔬 Tests:** Correlation | Cointegration | OLS | ADF | Half Life | ECM')
+    st.markdown('**📡 Data:** Yahoo Finance | Angel One API | NSE India | NSE Nifty 500')
+    st.divider()
+    st.success('💡 Pro Tip: Always select SAME SECTOR pairs for more accurate trades!')
+    st.error('⚠️ DISCLAIMER: For EDUCATIONAL PURPOSE only. NOT financial advice. Consult SEBI registered advisor.')
+    st.info('✖️ Click X on top right to close.')
+
+if st.session_state.show_guide:
+    show_guide_modal()
 
 # Load data
-@st.cache_data
+@st.cache_data(ttl=3600)
 def load_data():
     import io
     def load_gdrive(file_id, index_col=None, parse_dates=False):
@@ -25,7 +69,7 @@ def load_data():
         return pd.read_csv(url, index_col=index_col, parse_dates=parse_dates)
     daily_prices = load_gdrive('1OYaAmKCCwFD4QR4OSR013bDfdYpSasEW', index_col=0, parse_dates=True)
     intraday_prices = load_gdrive('1gHtG4HylRb25nhaRi41cINk4TxlIkeJO', index_col=0, parse_dates=True)
-    analysis_df = load_gdrive('17KvzRDgSILcWwLI9n_osBGYNl1EC43ck')
+    analysis_df = load_gdrive('1ogtOX5ysseqMExYmJugSHMu8crU3LPPK')
     return daily_prices, intraday_prices, analysis_df
 
 daily_prices, intraday_prices, analysis_df = load_data()
@@ -50,9 +94,11 @@ def connect_angel():
         data = obj.generateSession(CLIENT_ID, PASSWORD, totp)
         if data['status']:
             return obj
-    except:
-        pass
+    except Exception as e:
+        st.error(f'Angel One connection failed: {e}')
     return None
+
+angel_obj = connect_angel()
 
 def get_token(symbol):
     result = instruments[(instruments['symbol'] == symbol + '-EQ') & (instruments['exch_seg'] == 'NSE')]
@@ -60,11 +106,10 @@ def get_token(symbol):
 
 def get_live_price(symbol):
     try:
-        obj = connect_angel()
-        if obj:
+        if angel_obj:
             token = get_token(symbol)
             if token:
-                data = obj.ltpData('NSE', symbol + '-EQ', token)
+                data = angel_obj.ltpData('NSE', symbol + '-EQ', token)
                 if data['status']:
                     return data['data']['ltp']
     except:
@@ -96,6 +141,58 @@ with tab1:
     if same_sector_only:
         filtered = filtered[filtered['Same Sector']==True]
     active = filtered
+    # Recalculate live Z-Score for all pairs
+    live_results = []
+    for _, row in filtered.iterrows():
+        s1 = row['Stock 1']
+        s2 = row['Stock 2']
+        p1 = get_live_price(s1)
+        p2 = get_live_price(s2)
+        if p1 and p2:
+            hr = row['Hedge Ratio']
+            spread = daily_prices[s1] - hr * daily_prices[s2]
+            live_spread = p1 - hr * p2
+            live_z = round((live_spread - spread.mean()) / spread.std(), 2)
+            if live_z > 3: signal = 'CAUTION'
+            elif live_z > 2: signal = 'SELL'
+            elif live_z < -3: signal = 'CAUTION'
+            elif live_z < -2: signal = 'BUY'
+            else: signal = 'NO TRADE'
+            row = row.copy()
+            row['Live Z'] = live_z
+            row['Signal'] = signal
+        live_results.append(row)
+    if live_results:
+        active = pd.DataFrame(live_results)
+        active = active[active['Signal']!='NO TRADE']
+    else:
+        active = filtered[filtered['Signal']!='NO TRADE']
+    # Recalculate live Z-Score for all pairs
+    live_results = []
+    for _, row in filtered.iterrows():
+        s1 = row['Stock 1']
+        s2 = row['Stock 2']
+        p1 = get_live_price(s1)
+        p2 = get_live_price(s2)
+        if p1 and p2:
+            hr = row['Hedge Ratio']
+            spread = daily_prices[s1] - hr * daily_prices[s2]
+            live_spread = p1 - hr * p2
+            live_z = round((live_spread - spread.mean()) / spread.std(), 2)
+            if live_z > 3: signal = 'CAUTION'
+            elif live_z > 2: signal = 'SELL'
+            elif live_z < -3: signal = 'CAUTION'
+            elif live_z < -2: signal = 'BUY'
+            else: signal = 'NO TRADE'
+            row = row.copy()
+            row['Live Z'] = live_z
+            row['Signal'] = signal
+        live_results.append(row)
+    if live_results:
+        active = pd.DataFrame(live_results)
+        active = active[active['Signal']!='NO TRADE']
+    else:
+        active = filtered[filtered['Signal']!='NO TRADE']
     buy_signals = active[active['Signal']=='BUY'].sort_values('Live Z')
     sell_signals = active[active['Signal']=='SELL'].sort_values('Live Z', ascending=False)
     col1, col2, col3, col4 = st.columns(4)
@@ -116,9 +213,15 @@ with tab1:
             st.success(f"{row['Stock 1']} ({row['Sector 1']}) vs {row['Stock 2']} ({row['Sector 2']}) | {same} | Corr: {row['Correlation']} | Z: {row['Live Z']} | HL: {row['Half Life']}d | ADF: {row['ADF P-Val']}")
     with sc:
         st.markdown('<h3 style="color:red;">SELL Signals</h3>', unsafe_allow_html=True)
+        caution_signals = active[active['Signal']=='CAUTION']
         for _, row in sell_signals.iterrows():
             same = 'Same Sector' if row['Same Sector'] else 'Diff Sector'
             st.error(f"{row['Stock 1']} ({row['Sector 1']}) vs {row['Stock 2']} ({row['Sector 2']}) | {same} | Corr: {row['Correlation']} | Z: {row['Live Z']} | HL: {row['Half Life']}d | ADF: {row['ADF P-Val']}")
+        if len(caution_signals) > 0:
+            st.markdown('<h3 style="color:darkorange;">⚠️ CAUTION Signals</h3>', unsafe_allow_html=True)
+            for _, row in caution_signals.iterrows():
+                same = 'Same Sector' if row['Same Sector'] else 'Diff Sector'
+                st.warning(f"{row['Stock 1']} ({row['Sector 1']}) vs {row['Stock 2']} ({row['Sector 2']}) | {same} | Z: {row['Live Z']} — Beyond Stop Loss! Consider Exiting!")
 
 with tab2:
     st.markdown('<h2 style="text-align:center;">Pair Analysis</h2>', unsafe_allow_html=True)
@@ -182,9 +285,32 @@ with tab2:
         with m3:
             st.metric('Half Life', str(pair_data['Half Life']) + ' days')
         with m4:
-            st.metric('Live Z-Score', pair_data['Live Z'])
+            # Calculate live Z-Score
+            live_p1 = get_live_price(stock1)
+            live_p2 = get_live_price(stock2)
+            hedge_ratio = pair_data['Hedge Ratio']
+            spread = daily_prices[stock1] - hedge_ratio * daily_prices[stock2]
+            if live_p1 and live_p2:
+                live_spread = live_p1 - hedge_ratio * live_p2
+                live_z = round((live_spread - spread.mean()) / spread.std(), 2)
+                if live_z > 3: live_signal = 'CAUTION'
+                elif live_z > 2: live_signal = 'SELL'
+                elif live_z < -3: live_signal = 'CAUTION'
+                elif live_z < -2: live_signal = 'BUY'
+                else: live_signal = 'NO TRADE'
+            else:
+                live_z = pair_data['Live Z']
+                live_signal = pair_data['Signal']
+            st.metric('Live Z-Score', live_z)
         with m5:
-            st.metric('Signal', pair_data['Signal'])
+            if live_signal == 'BUY':
+                st.markdown('<h3 style="color:green;">BUY</h3>', unsafe_allow_html=True)
+            elif live_signal == 'SELL':
+                st.markdown('<h3 style="color:red;">SELL</h3>', unsafe_allow_html=True)
+            elif live_signal == 'CAUTION':
+                st.markdown('<h3 style="color:darkorange;">⚠️ CAUTION — Beyond Stop Loss!</h3>', unsafe_allow_html=True)
+            else:
+                st.markdown('<h3 style="color:gray;">NO TRADE</h3>', unsafe_allow_html=True)
         st.divider()
         hedge_ratio = pair_data['Hedge Ratio']
         spread = daily_prices[stock1] - hedge_ratio * daily_prices[stock2]

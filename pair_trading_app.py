@@ -10,19 +10,32 @@ from numpy.linalg import lstsq
 from statsmodels.tsa.stattools import adfuller
 
 st.set_page_config(page_title='AlphaPairs', page_icon='📈', layout='wide')
+
+# Hide Streamlit branding and GitHub link
+hide_streamlit_style = """
+<style>
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+header {visibility: hidden;}
+.viewerBadge_container__1QSob {display: none !important;}
+.styles_viewerBadge__1yB5_ {display: none !important;}
+[data-testid='stToolbar'] {display: none !important;}
+</style>
+"""
+st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 st.markdown('<h1 style="text-align:center; color:#1f77b4;">AlphaPairs</h1>', unsafe_allow_html=True)
 st.markdown('<h4 style="text-align:center; color:#444444;"><i>Find the Divergence. Capture the Convergence.</i></h4>', unsafe_allow_html=True)
 st.markdown('<h5 style="text-align:center; color:gray;">Statistical Pair Trading — OLS | ADF | ECM | Cointegration | Live Angel One Data</h5>', unsafe_allow_html=True)
 st.markdown('<h5 style="text-align:center; color:gray;">Powered by OLS Regression | ADF Test | ECM | Live Angel One Data</h5>', unsafe_allow_html=True)
-# Guide Modal
 if 'show_guide' not in st.session_state:
+    st.session_state.show_guide = True
     st.session_state.show_guide = True
 
 col_guide = st.columns([8, 1])
 with col_guide[1]:
     if st.button('📖 Guide'):
         st.session_state.show_guide = True
-        st.rerun()
+
 
 @st.dialog('Welcome to AlphaPairs 📈', width='large')
 def show_guide_modal():
@@ -59,6 +72,7 @@ def show_guide_modal():
 
 if st.session_state.show_guide:
     show_guide_modal()
+    st.session_state.show_guide = False
 
 # Load data
 @st.cache_data(ttl=3600)
@@ -70,15 +84,22 @@ def load_data():
     daily_prices = load_gdrive('1OYaAmKCCwFD4QR4OSR013bDfdYpSasEW', index_col=0, parse_dates=True)
     intraday_prices = load_gdrive('1gHtG4HylRb25nhaRi41cINk4TxlIkeJO', index_col=0, parse_dates=True)
     analysis_df = load_gdrive('1ogtOX5ysseqMExYmJugSHMu8crU3LPPK')
+    analysis_df = analysis_df[analysis_df['Same Sector']==True]
     return daily_prices, intraday_prices, analysis_df
 
 daily_prices, intraday_prices, analysis_df = load_data()
 
 # Angel One Connection
-API_KEY = 'TCnuzAAt'
-CLIENT_ID = 'S906141'
-PASSWORD = '1470'
-TOTP_KEY = 'K266OMHBXKUDGXG2VTLMKG6SCA'
+try:
+    API_KEY = st.secrets['ANGEL_API_KEY']
+    CLIENT_ID = st.secrets['ANGEL_CLIENT_ID']
+    PASSWORD = st.secrets['ANGEL_PASSWORD']
+    TOTP_KEY = st.secrets['ANGEL_TOTP_KEY']
+except:
+    API_KEY = os.environ.get('ANGEL_API_KEY', '')
+    CLIENT_ID = os.environ.get('ANGEL_CLIENT_ID', '')
+    PASSWORD = os.environ.get('ANGEL_PASSWORD', '')
+    TOTP_KEY = os.environ.get('ANGEL_TOTP_KEY', '')
 
 @st.cache_resource
 def load_instruments():
@@ -128,14 +149,12 @@ with tab1:
     st.markdown('<h2 style="text-align:center;">Live Trading Signals</h2>', unsafe_allow_html=True)
     st.divider()
     all_sectors = ['All Sectors'] + sorted(list(set(list(analysis_df['Sector 1'].unique()) + list(analysis_df['Sector 2'].unique()))))
-    fc1, fc2, fc3, fc4 = st.columns(4)
+    fc1, fc2, fc3 = st.columns(3)
     with fc1:
         selected_sector = st.selectbox('Filter by Sector', all_sectors)
     with fc2:
-        same_sector_only = st.checkbox('Same Sector Pairs Only')
-    with fc3:
         min_corr = st.slider('Min Correlation', 0.70, 0.99, 0.80)
-    with fc4:
+    with fc3:
         if st.button('Refresh Signals'):
             st.cache_data.clear()
             st.rerun()
@@ -143,8 +162,6 @@ with tab1:
     filtered = analysis_df[(analysis_df['Stationary']=='YES') & (analysis_df['Signal']!='NO TRADE') & (analysis_df['Signal']!='N/A') & (analysis_df['Correlation'] >= min_corr)]
     if selected_sector != 'All Sectors':
         filtered = filtered[(filtered['Sector 1']==selected_sector) | (filtered['Sector 2']==selected_sector)]
-    if same_sector_only:
-        filtered = filtered[filtered['Same Sector']==True]
     active = filtered
     # Recalculate live Z-Score for all pairs
     live_results = []
@@ -472,7 +489,9 @@ with tab2:
 with tab3:
     st.markdown('<h2 style="text-align:center;">All Valid Pairs</h2>', unsafe_allow_html=True)
     st.divider()
-    st.dataframe(analysis_df[analysis_df['Stationary']=='YES'].sort_values('Live Z', key=abs, ascending=False), use_container_width=True)
+    display_df = analysis_df[analysis_df['Stationary']=='YES'].sort_values('Live Z', key=abs, ascending=False).reset_index(drop=True)
+    display_df.index = display_df.index + 1
+    st.dataframe(display_df, use_container_width=True)
 
 st.divider()
 st.markdown('<h4 style="text-align:center; color:gray;">© 2026 AlphaPairs | Built by Shashank Agarwal | Data: Angel One & Yahoo Finance | All Rights Reserved</h4>', unsafe_allow_html=True)

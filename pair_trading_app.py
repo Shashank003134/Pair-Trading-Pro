@@ -304,8 +304,10 @@ with tab2:
             st.metric('Correlation', pair_data['Correlation'])
         with m2:
             st.metric('Hedge Ratio', pair_data['Hedge Ratio'])
+            st.caption(f"For every 1 lot of {stock1}, trade {pair_data['Hedge Ratio']} lots of {stock2}")
         with m3:
             st.metric('Half Life', str(pair_data['Half Life']) + ' days')
+            st.caption(f"Spread takes ~{pair_data['Half Life']} days to revert halfway to mean")
         with m4:
             # Calculate live Z-Score
             live_p1 = get_live_price(stock1)
@@ -402,26 +404,64 @@ with tab2:
         fig3.update_layout(title=f'Spread Chart — {stock1} vs {stock2}', xaxis_title='Date', yaxis_title='Spread')
         st.plotly_chart(fig3, use_container_width=True, key='spread_chart')
         st.divider()
-        st.subheader('Trade Entry/Exit Levels')
+        st.subheader('Trade Action Card')
         live_p1 = get_live_price(stock1)
         live_p2 = get_live_price(stock2)
-        entry_sell = round(spread.mean() + 2*spread.std(), 2)
-        entry_buy = round(spread.mean() - 2*spread.std(), 2)
-        exit_level = round(spread.mean(), 2)
-        stop_loss_sell = round(spread.mean() + 3*spread.std(), 2)
-        stop_loss_buy = round(spread.mean() - 3*spread.std(), 2)
+        spread_mean = round(spread.mean(), 2)
+        spread_std = round(spread.std(), 2)
         current_spread = round(spread.iloc[-1], 2)
-        t1, t2, t3, t4, t5 = st.columns(5)
-        with t1:
-            st.metric('Current Spread', current_spread)
-        with t2:
-            st.metric('Sell Entry', entry_sell)
-        with t3:
-            st.metric('Buy Entry', entry_buy)
-        with t4:
-            st.metric('Exit (Mean)', exit_level)
-        with t5:
-            st.metric('Stop Loss', stop_loss_sell if pair_data['Signal']=='SELL' else stop_loss_buy)
+        entry_sell = round(spread_mean + 2*spread_std, 2)
+        entry_buy = round(spread_mean - 2*spread_std, 2)
+        stop_loss_sell = round(spread_mean + 3*spread_std, 2)
+        stop_loss_buy = round(spread_mean - 3*spread_std, 2)
+
+        # Determine card color and action
+        if live_signal == 'BUY':
+            card_color = '#1a7a1a'
+            action_text = f'BUY {stock1} Futures | SELL {stock2} Futures'
+            stop_loss_level = '-3.0'
+            stop_loss_spread = stop_loss_buy
+            reward = round(abs(current_spread - spread_mean) * 1, 2)
+            risk = round(abs(spread_std), 2)
+        elif live_signal == 'SELL':
+            card_color = '#7a1a1a'
+            action_text = f'SELL {stock1} Futures | BUY {stock2} Futures'
+            stop_loss_level = '+3.0'
+            stop_loss_spread = stop_loss_sell
+            reward = round(abs(current_spread - spread_mean) * 1, 2)
+            risk = round(abs(spread_std), 2)
+        elif live_signal == 'CAUTION':
+            card_color = '#7a4a00'
+            action_text = f'CAUTION — Beyond Stop Loss! Avoid new trades!'
+            stop_loss_level = '±3.0'
+            stop_loss_spread = 'N/A'
+            reward = 0
+            risk = 0
+        else:
+            card_color = '#1a3a7a'
+            action_text = f'Wait for Z-Score to cross ±2'
+            stop_loss_level = '±3.0'
+            stop_loss_spread = 'N/A'
+            reward = 0
+            risk = 0
+
+        rr_ratio = round(reward / risk, 2) if risk > 0 else 0
+        half_life_val = pair_data['Half Life']
+
+        st.markdown(f"""
+        <div style='background-color:#1a1a2e; padding:20px; border-radius:12px; border-left:6px solid {card_color};'>
+        <h3 style='color:{card_color}; margin:0;'>{live_signal} SIGNAL — {stock1} vs {stock2}</h3>
+        <hr style='border-color:#333; margin:10px 0;'>
+        <table style='width:100%; color:white; font-size:16px;'>
+        <tr><td style='padding:5px;'>📌 <b>ACTION</b></td><td style='padding:5px; color:{card_color};'><b>{action_text}</b></td></tr>
+        <tr><td style='padding:5px;'>📊 <b>LIVE Z-SCORE</b></td><td style='padding:5px;'>{live_z} (Signal Active!)</td></tr>
+        <tr><td style='padding:5px;'>💰 <b>LIVE PRICES</b></td><td style='padding:5px;'>{stock1}: ₹{live_p1} | {stock2}: ₹{live_p2}</td></tr>
+        <tr><td style='padding:5px;'>🎯 <b>ENTER</b></td><td style='padding:5px;'>Now — Z already crossed ±2</td></tr>
+        <tr><td style='padding:5px;'>✅ <b>EXIT</b></td><td style='padding:5px;'>When Z returns to 0 (~{half_life_val} days)</td></tr>
+        <tr><td style='padding:5px;'>🛑 <b>STOP LOSS</b></td><td style='padding:5px;'>If Z crosses {stop_loss_level} — Exit Immediately!</td></tr>
+        </table>
+        </div>
+        """, unsafe_allow_html=True)
         st.divider()
         st.subheader('Risk Calculator')
         import json, requests
@@ -444,11 +484,11 @@ with tab2:
         if current_signal == 'SELL':
             entry_spread = entry_sell
             sl_spread = stop_loss_sell
-            target_spread = exit_level
+            target_spread = spread_mean
         else:
             entry_spread = entry_buy
             sl_spread = stop_loss_buy
-            target_spread = exit_level
+            target_spread = spread_mean
         risk_per_unit = abs(entry_spread - sl_spread)
         reward_per_unit = abs(entry_spread - target_spread)
         risk_lots = round(risk_per_unit * lot_size1, 2)
